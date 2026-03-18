@@ -1,0 +1,115 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GridGuard AI — Docker Compose
+# Full stack: FastAPI + PostgreSQL/TimescaleDB + Redis + Celery
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+version: "3.9"
+
+services:
+  # ── PostgreSQL + TimescaleDB ──
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: gridguard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gridguard_db
+      POSTGRES_USER: gridguard
+      POSTGRES_PASSWORD: gridguard_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridguard -d gridguard_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──
+  redis:
+    image: redis:7-alpine
+    container_name: gridguard-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Application ──
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gridguard-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gridguard:gridguard_secret@postgres:5432/gridguard_db
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-internal-api-key}
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # ── Celery Worker ──
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gridguard-celery-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gridguard:gridguard_secret@postgres:5432/gridguard_db
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 -Q polling,policies,payouts,maintenance
+
+  # ── Celery Beat (Scheduler) ──
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gridguard-celery-beat
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gridguard:gridguard_secret@postgres:5432/gridguard_db
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+    env_file:
+      - .env
+    depends_on:
+      celery-worker:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,14 @@
+# GridGuard AI - Ignore patterns
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+*.db
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
