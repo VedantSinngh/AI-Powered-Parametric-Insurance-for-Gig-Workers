@@ -1,0 +1,24 @@
+# GridGuard AI Backend
+
+## .env
+.env
+.env.*
+
+## Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+## ML Models
+models/*.pkl
+
+## IDE
+.vscode/
+.idea/
+
+## OS
+.DS_Store
+Thumbs.db
